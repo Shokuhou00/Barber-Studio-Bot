@@ -5,25 +5,31 @@ const { sanitize, logInfo, logError, logWarn } = require('../lib/utils');
 const { procesarMensaje } = require('../lib/sessions');
 const { marcarLeido } = require('../lib/whatsapp');
 
-// Vercel serverless function
 module.exports = async (req, res) => {
+  // Parsear query params manualmente para manejar claves con puntos
+  const url = require('url');
+  const parsedUrl = url.parse(req.url, true);
+  const query = parsedUrl.query || {};
+
   // ── GET: verificación del webhook con Meta ──────────────────────
   if (req.method === 'GET') {
-    const mode      = req.query['hub.mode'];
-    const token     = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
+    const mode      = query['hub.mode'];
+    const token     = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
+
+    logInfo('doGet webhook verify', { mode, token: token ? '***' : 'FALTANTE' });
 
     if (mode === 'subscribe' && token === CONFIG.VERIFY_TOKEN) {
       logInfo('Webhook verificado por Meta');
       return res.status(200).send(challenge);
     }
-    logWarn('Verificación fallida');
+    logWarn('Verificación fallida — token incorrecto o modo incorrecto');
     return res.status(403).send('Forbidden');
   }
 
   // ── POST: mensajes entrantes de WhatsApp ────────────────────────
   if (req.method === 'POST') {
-    // Responder 200 inmediatamente — Meta no reenvía si recibe OK rápido
+    // Responder 200 inmediatamente para que Meta no reenvíe
     res.status(200).send('OK');
 
     try {
@@ -41,7 +47,7 @@ module.exports = async (req, res) => {
         }
       }
     } catch(e) {
-      logError('doPost error', { error: e.message });
+      logError('doPost error', { error: e.message, stack: e.stack });
     }
     return;
   }
@@ -69,10 +75,6 @@ async function _procesarMensaje(msg) {
   }
 
   logInfo('Mensaje entrante', { telefono, tipo: msgType, id: msg.id });
-
-  // Marcar como leído (checks azules)
   await marcarLeido(telefono, msg.id);
-
-  // Procesar en la máquina de estados
   await procesarMensaje(telefono, msgType, msgData);
 }
