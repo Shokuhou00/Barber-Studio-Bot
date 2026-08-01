@@ -6,26 +6,6 @@ const { procesarMensaje } = require('../lib/sessions');
 const { marcarLeido } = require('../lib/whatsapp');
 const { parse } = require('url');
 
-// Helper para parsear body de la request
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    // Si ya viene parseado (algunos entornos lo hacen)
-    if (req.body && typeof req.body === 'object') {
-      return resolve(req.body);
-    }
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
-    req.on('end', () => {
-      try {
-        resolve(data ? JSON.parse(data) : {});
-      } catch(e) {
-        resolve({});
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
 module.exports = async (req, res) => {
   const { query } = parse(req.url, true);
 
@@ -35,7 +15,7 @@ module.exports = async (req, res) => {
     const token     = query['hub.verify_token'];
     const challenge = query['hub.challenge'];
 
-    logInfo('doGet webhook verify', { mode, token: token ? '***' : 'FALTANTE' });
+    logInfo('doGet', { mode, token: token ? '***' : 'FALTANTE' });
 
     if (mode === 'subscribe' && token === CONFIG.VERIFY_TOKEN) {
       logInfo('Webhook verificado por Meta');
@@ -45,22 +25,36 @@ module.exports = async (req, res) => {
     }
 
     logWarn('Verificación fallida');
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.writeHead(403);
     res.end('Forbidden');
     return;
   }
 
-  // ── POST: mensajes entrantes de WhatsApp ────────────────────────
+  // ── POST: mensajes entrantes ────────────────────────────────────
   if (req.method === 'POST') {
-    // Responder 200 inmediatamente para que Meta no reenvíe
+    // 1. Leer body completo primero
+    let rawBody = '';
+    await new Promise((resolve, reject) => {
+      req.on('data', chunk => { rawBody += chunk.toString(); });
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+
+    // 2. Responder 200 OK inmediatamente
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('OK');
 
+    // 3. Procesar en background
     try {
-      const body = await parseBody(req);
-      logInfo('doPost body recibido', { object: body.object });
+      if (!rawBody) {
+        logWarn('Body vacío');
+        return;
+      }
 
-      if (!body || body.object !== 'whatsapp_business_account') return;
+      const body = JSON.parse(rawBody);
+      logInfo('POST recibido', { object: body.object, rawLen: rawBody.length });
+
+      if (body.object !== 'whatsapp_business_account') return;
 
       const entries = body.entry || [];
       for (const entry of entries) {
@@ -73,22 +67,26 @@ module.exports = async (req, res) => {
         }
       }
     } catch(e) {
-      logError('doPost error', { error: e.message, stack: e.stack });
+      logError('Error procesando POST', { error: e.message, stack: e.stack });
     }
     return;
   }
 
-  res.writeHead(405, { 'Content-Type': 'text/plain' });
+  res.writeHead(405);
   res.end('Method Not Allowed');
 };
 
 async function _procesarMensaje(msg) {
   const telefono = sanitize(msg.from || '');
-  if (!telefono) return;
+  if (!telefono) {
+    logWarn('Mensaje sin teléfono');
+    return;
+  }
 
   const msgType = msg.type || '';
-  let msgData = null;
+  logInfo('Mensaje entrante', { telefono, tipo: msgType, id: msg.id });
 
+  let msgData = null;
   switch (msgType) {
     case 'text':
       msgData = msg.text || {};
@@ -97,11 +95,10 @@ async function _procesarMensaje(msg) {
       msgData = msg.interactive || {};
       break;
     default:
-      logWarn('Tipo de mensaje no manejado: ' + msgType);
+      logWarn('Tipo no manejado: ' + msgType);
       return;
   }
 
-  logInfo('Mensaje entrante', { telefono, tipo: msgType, id: msg.id });
   await marcarLeido(telefono, msg.id);
   await procesarMensaje(telefono, msgType, msgData);
 }
