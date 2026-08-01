@@ -4,12 +4,10 @@ const { CONFIG } = require('../lib/config');
 const { sanitize, logInfo, logError, logWarn } = require('../lib/utils');
 const { procesarMensaje } = require('../lib/sessions');
 const { marcarLeido } = require('../lib/whatsapp');
+const { parse } = require('url');
 
 module.exports = async (req, res) => {
-  // Parsear query params manualmente para manejar claves con puntos
-  const url = require('url');
-  const parsedUrl = url.parse(req.url, true);
-  const query = parsedUrl.query || {};
+  const { query } = parse(req.url, true);
 
   // ── GET: verificación del webhook con Meta ──────────────────────
   if (req.method === 'GET') {
@@ -21,16 +19,22 @@ module.exports = async (req, res) => {
 
     if (mode === 'subscribe' && token === CONFIG.VERIFY_TOKEN) {
       logInfo('Webhook verificado por Meta');
-      return res.status(200).send(challenge);
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end(challenge);
+      return;
     }
-    logWarn('Verificación fallida — token incorrecto o modo incorrecto');
-    return res.status(403).send('Forbidden');
+
+    logWarn('Verificación fallida');
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Forbidden');
+    return;
   }
 
   // ── POST: mensajes entrantes de WhatsApp ────────────────────────
   if (req.method === 'POST') {
     // Responder 200 inmediatamente para que Meta no reenvíe
-    res.status(200).send('OK');
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('OK');
 
     try {
       const body = req.body;
@@ -52,7 +56,8 @@ module.exports = async (req, res) => {
     return;
   }
 
-  return res.status(405).send('Method Not Allowed');
+  res.writeHead(405, { 'Content-Type': 'text/plain' });
+  res.end('Method Not Allowed');
 };
 
 async function _procesarMensaje(msg) {

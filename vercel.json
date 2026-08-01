@@ -7,11 +7,6 @@
   },
   "routes": [
     {
-      "src": "/webhook",
-      "dest": "/api/webhook.js",
-      "methods": ["GET", "POST"]
-    },
-    {
       "src": "/(.*)",
       "dest": "/api/webhook.js"
     }
