@@ -6,6 +6,26 @@ const { procesarMensaje } = require('../lib/sessions');
 const { marcarLeido } = require('../lib/whatsapp');
 const { parse } = require('url');
 
+// Helper para parsear body de la request
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    // Si ya viene parseado (algunos entornos lo hacen)
+    if (req.body && typeof req.body === 'object') {
+      return resolve(req.body);
+    }
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch(e) {
+        resolve({});
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 module.exports = async (req, res) => {
   const { query } = parse(req.url, true);
 
@@ -37,7 +57,9 @@ module.exports = async (req, res) => {
     res.end('OK');
 
     try {
-      const body = req.body;
+      const body = await parseBody(req);
+      logInfo('doPost body recibido', { object: body.object });
+
       if (!body || body.object !== 'whatsapp_business_account') return;
 
       const entries = body.entry || [];
