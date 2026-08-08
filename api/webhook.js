@@ -32,7 +32,7 @@ module.exports = async (req, res) => {
 
   // ── POST: mensajes entrantes ────────────────────────────────────
   if (req.method === 'POST') {
-    // 1. Leer body completo primero
+    // Leer body completo
     let rawBody = '';
     await new Promise((resolve, reject) => {
       req.on('data', chunk => { rawBody += chunk.toString(); });
@@ -40,22 +40,24 @@ module.exports = async (req, res) => {
       req.on('error', reject);
     });
 
-    // 2. Responder 200 OK inmediatamente
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('OK');
-
-    // 3. Procesar en background
     try {
       if (!rawBody) {
         logWarn('Body vacío');
+        res.writeHead(200);
+        res.end('OK');
         return;
       }
 
       const body = JSON.parse(rawBody);
       logInfo('POST recibido', { object: body.object, rawLen: rawBody.length });
 
-      if (body.object !== 'whatsapp_business_account') return;
+      if (body.object !== 'whatsapp_business_account') {
+        res.writeHead(200);
+        res.end('OK');
+        return;
+      }
 
+      // Procesar TODOS los mensajes ANTES de responder
       const entries = body.entry || [];
       for (const entry of entries) {
         for (const change of (entry.changes || [])) {
@@ -69,6 +71,10 @@ module.exports = async (req, res) => {
     } catch(e) {
       logError('Error procesando POST', { error: e.message, stack: e.stack });
     }
+
+    // Responder DESPUÉS de procesar todo
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('OK');
     return;
   }
 
@@ -100,5 +106,7 @@ async function _procesarMensaje(msg) {
   }
 
   await marcarLeido(telefono, msg.id);
+  logInfo('Iniciando procesarMensaje', { telefono, tipo: msgType });
   await procesarMensaje(telefono, msgType, msgData);
+  logInfo('procesarMensaje completado', { telefono });
 }
